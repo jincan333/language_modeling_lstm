@@ -5,15 +5,13 @@ import torch
 import torch.nn as nn
 import corpus
 import model
-import numpy as np
-import json
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 
 # consensus
 parser.add_argument('--exp_name', type=str, default='lstm_ptb')
 parser.add_argument('--loss', type=str, default='consensus_exclude')
-parser.add_argument('--alpha', type=float, default=1)
+parser.add_argument('--consensus_alpha', type=float, default=1)
 parser.add_argument('--models_num', type=int, default=1)
 parser.add_argument('--detach', type=int, default=1)
 parser.add_argument('--learnable_q', type=int, default=1)
@@ -32,29 +30,14 @@ parser.add_argument('--epochs', type=int, default=30)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.5)
-
-# parser.add_argument('--emsize', type=int, default=400)
-# parser.add_argument('--nhid', type=int, default=1150)
-# parser.add_argument('--nlayers', type=int, default=2)
-# parser.add_argument('--lr', type=float, default=30)
-# parser.add_argument('--clip', type=float, default=0.25)
-# parser.add_argument('--epochs', type=int, default=30)
-# parser.add_argument('--batch_size', type=int, default=20)
-# parser.add_argument('--bptt', type=int, default=70)
-# parser.add_argument('--dropout', type=float, default=0.4)
-
-parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
                     help='path to save the final model')
 parser.add_argument('--opt', type=str,  default='SGD',
                     help='SGD, Adam, RMSprop, Momentum')
 args = parser.parse_args()
-print(json.dumps(vars(args), indent=4))
-np.random.seed(args.seed)
+
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
-torch.cuda.set_device(int(args.gpu))
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -78,14 +61,14 @@ test_data = batchify(corpus.test, eval_batch_size)
 # Build the model
 interval = 200 # interval to report
 ntokens = len(corpus.dictionary) # 10000
-model = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
+model = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout)
 
 # Load checkpoint
 if args.checkpoint != '':
-    model = torch.load(args.checkpoint, map_location=lambda storage, loc: storage).cuda()
+    model = torch.load(args.checkpoint, map_location=lambda storage, loc: storage)
 
 print(model)
-criterion = nn.CrossEntropyLoss().cuda()
+criterion = nn.CrossEntropyLoss()
 
 # Training code
 
@@ -101,7 +84,7 @@ def get_batch(source, i):
     data = source[i:i+seq_len].clone().detach()
     target = source[i+1:i+1+seq_len].clone().detach().view(-1)
     #target = torch.tensor(source[i+1:i+1+seq_len].view(-1)) # size(bptt * bsz)
-    return data.cuda(), target.cuda()
+    return data, target
 
 
 def evaluate(data_source):
@@ -151,7 +134,7 @@ def train():
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
-                epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+                epoch, batch, len(train_data) // args.bptt, lr,
                 elapsed * 1000 / interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
@@ -168,7 +151,6 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(model.parameters(), lr=0.001, alpha=0.9)
     lr = 0.001
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -180,19 +162,17 @@ try:
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                            val_loss, math.exp(val_loss)))
         print('-' * 89)
-        scheduler.step()
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
-        # else:
-        #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
-        #     if args.opt == 'SGD' or args.opt == 'Momentum':
-        #         lr /= 4.0
-        #         for group in opt.param_groups:
-        #             group['lr'] = lr
-        
+        else:
+            # Anneal the learning rate if no improvement has been seen in the validation dataset.
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr /= 4.0
+                for group in opt.param_groups:
+                    group['lr'] = lr
 
 except KeyboardInterrupt:
     print('-' * 89)

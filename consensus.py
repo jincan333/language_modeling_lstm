@@ -6,7 +6,10 @@ import torch.nn as nn
 import corpus
 import model
 import numpy as np
+import torch.nn.functional as F
+from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB
 import json
+
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 
@@ -32,17 +35,6 @@ parser.add_argument('--epochs', type=int, default=30)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.5)
-
-# parser.add_argument('--emsize', type=int, default=400)
-# parser.add_argument('--nhid', type=int, default=1150)
-# parser.add_argument('--nlayers', type=int, default=2)
-# parser.add_argument('--lr', type=float, default=30)
-# parser.add_argument('--clip', type=float, default=0.25)
-# parser.add_argument('--epochs', type=int, default=30)
-# parser.add_argument('--batch_size', type=int, default=20)
-# parser.add_argument('--bptt', type=int, default=70)
-# parser.add_argument('--dropout', type=float, default=0.4)
-
 parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
@@ -55,6 +47,7 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
+
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -78,14 +71,25 @@ test_data = batchify(corpus.test, eval_batch_size)
 # Build the model
 interval = 200 # interval to report
 ntokens = len(corpus.dictionary) # 10000
-model = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
+
+models = [0 for _ in range(args.models_num)]
+for k in range(args.models_num):
+    np.random.seed(k)
+    torch.manual_seed(k)
+    torch.cuda.manual_seed(k)
+    models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
+    print(models[k])
 
 # Load checkpoint
-if args.checkpoint != '':
-    model = torch.load(args.checkpoint, map_location=lambda storage, loc: storage).cuda()
+# if args.checkpoint != '':
+#     model = torch.load(args.checkpoint, map_location=lambda storage, loc: storage).cuda()
 
-print(model)
+
 criterion = nn.CrossEntropyLoss().cuda()
+if args.loss=='consensus_exclude':
+    consensus_loss = ClassifierConsensusExcludeLossPTB(models, args)
+elif args.loss=='consensus_forth':
+    consensus_loss = ClassifierConsensusForthLossPTB(models, args)
 
 # Training code
 
@@ -106,67 +110,80 @@ def get_batch(source, i):
 
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
-    with torch.no_grad():
-        model.eval()
-        total_loss = 0
-        ntokens = len(corpus.dictionary)
-        hidden = model.init_hidden(eval_batch_size) #hidden size(nlayers, bsz, hdsize)
-        for i in range(0, data_source.size(0) - 1, args.bptt):# iterate over every timestep
-            data, targets = get_batch(data_source, i)
-            output, hidden = model(data, hidden)
-            # model input and output
-            # inputdata size(bptt, bsz), and size(bptt, bsz, embsize) after embedding
-            # output size(bptt*bsz, ntoken)
-            total_loss += len(data) * criterion(output, targets).data
-            hidden = repackage_hidden(hidden)
-        return total_loss / len(data_source)
+    losses = [0 for _ in range(args.models_num)]
+    consensus_loss.q.requires_grad_(False)
+    for k in range(args.models_num):
+        with torch.no_grad():
+            models[k].eval()
+            total_loss = 0
+            ntokens = len(corpus.dictionary)
+            hidden = models[k].init_hidden(eval_batch_size) #hidden size(nlayers, bsz, hdsize)
+            for i in range(0, data_source.size(0) - 1, args.bptt):# iterate over every timestep
+                data, targets = get_batch(data_source, i)
+                output, hidden = models[k](data, hidden)
+                # model input and output
+                # inputdata size(bptt, bsz), and size(bptt, bsz, embsize) after embedding
+                # output size(bptt*bsz, ntoken)
+                total_loss += len(data) * criterion(output, targets).data
+                hidden = repackage_hidden(hidden)
+        losses[k] = total_loss / len(data_source)
+    q_softmax = F.softmax(consensus_loss.q, dim=0) if consensus_loss.learnable_q else F.softmax(torch.zeros(consensus_loss.models_num), dim=0)
+    print('q_softmax:', q_softmax)
+    return losses
 
 
 def train():
     # choose a optimizer
-
-    model.train()
+    for k in range(args.models_num):
+        models[k].train()
+    consensus_loss.q.requires_grad_(True)
     total_loss = 0
     start_time = time.time()
-    hidden = model.init_hidden(args.batch_size)
+    hiddenes = [models[k].init_hidden(args.batch_size) for k in range(args.models_num)]
     # train_data size(batchcnt, bsz)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        hidden = repackage_hidden(hidden)
-        output, hidden = model(data, hidden)
-        loss = criterion(output, targets)
-        opt.zero_grad()
-        loss.backward()
+        for k in range(args.models_num):
+            hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
+            loss, _, logits, hiddenes = consensus_loss(k, data, hiddenes, targets)
+            opt.zero_grad()
+            loss.backward()
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        opt.step()
+            # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+            torch.nn.utils.clip_grad_norm_(params, args.clip)
+            opt.step()
 
-        total_loss += loss.data
+        total_loss += loss
 
         if batch % interval == 0 and batch > 0:
             cur_loss = total_loss / interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f}'.format(
+                    'loss {:5.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
-                elapsed * 1000 / interval, cur_loss, math.exp(cur_loss)))
+                elapsed * 1000 / interval, cur_loss))
             total_loss = 0
             start_time = time.time()
 
 # Loop over epochs.
 lr = args.lr
-best_val_loss = None
-opt = torch.optim.SGD(model.parameters(), lr=lr)
+best_val_losses = [None for _ in range(args.models_num)]
+
+params = []
+for k in range(args.models_num):
+    params += list(models[k].parameters())
+params.append(consensus_loss.q)
+
+opt = torch.optim.SGD(params, lr=lr)
 if args.opt == 'Adam':
-    opt = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.99))
+    opt = torch.optim.Adam(params, lr=0.001, betas=(0.9, 0.99))
     lr = 0.001
 if args.opt == 'Momentum':
-    opt = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.8)
+    opt = torch.optim.SGD(params, lr=lr, momentum=0.8)
 if args.opt == 'RMSprop':
-    opt = torch.optim.RMSprop(model.parameters(), lr=0.001, alpha=0.9)
+    opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
     lr = 0.001
 scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
@@ -174,37 +191,42 @@ try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
-        val_loss = evaluate(val_data)
-        print('-' * 89)
-        print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                           val_loss, math.exp(val_loss)))
-        print('-' * 89)
+        val_losses = evaluate(val_data)
+        thres=0
         scheduler.step()
-        # Save the model if the validation loss is the best we've seen so far.
-        if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, 'wb') as f:
-                torch.save(model, f)
-            best_val_loss = val_loss
-        # else:
-        #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
-        #     if args.opt == 'SGD' or args.opt == 'Momentum':
-        #         lr /= 4.0
-        #         for group in opt.param_groups:
-        #             group['lr'] = lr
-        
+        for k in range(args.models_num):
+            print('-' * 89)
+            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
+                    'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
+                                            val_losses[k], math.exp(val_losses[k])))
+            print('-' * 89)
+            # Save the model if the validation loss is the best we've seen so far.
+            if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
+                with open(args.save+'_'+str(k), 'wb') as f:
+                    torch.save(models[k], f)
+                best_val_losses[k] = val_losses[k]
+            # else:
+            #     thres+=1
+            # if thres == args.models_num:
+            #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
+            #     if args.opt == 'SGD' or args.opt == 'Momentum':
+            #         lr /= 4.0
+            #         for group in opt.param_groups:
+            #             group['lr'] = lr
 
 except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
 # Load the best saved model.
-with open(args.save, 'rb') as f:
-    model = torch.load(f)
+for k in range(args.models_num):
+    with open(args.save+'_'+str(k), 'rb') as f:
+        models[k] = torch.load(f)
 
 # Run on test data.
-test_loss = evaluate(test_data)
-print('=' * 89)
-print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-    test_loss, math.exp(test_loss)))
-print('=' * 89)
+test_losses = evaluate(test_data)
+for k in range(args.models_num):
+    print('=' * 89)
+    print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+        test_losses[k], math.exp(test_losses[k])))
+    print('=' * 89)
