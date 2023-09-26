@@ -2,14 +2,14 @@
 
 loss='consensus_forth'
 alpha=1
-models_num=3
+models_num=2
 detach=1
 learnable_q=1
 
 epoch=30
-alpha_list=(2 3)
-gpu_list=(1 1 1)
-prefix='forth_debug'
+alpha_list=(0.5 1 2)
+gpu_list=(3 3 3)
+prefix='debug'
 for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}

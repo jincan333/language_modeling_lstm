@@ -7,7 +7,7 @@ import corpus
 import model
 import numpy as np
 import torch.nn.functional as F
-from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB
+from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB
 import json
 
 
@@ -74,9 +74,9 @@ ntokens = len(corpus.dictionary) # 10000
 
 models = [0 for _ in range(args.models_num)]
 for k in range(args.models_num):
-    np.random.seed(k)
-    torch.manual_seed(k)
-    torch.cuda.manual_seed(k)
+    np.random.seed(k+args.seed)
+    torch.manual_seed(k+args.seed)
+    torch.cuda.manual_seed(k+args.seed)
     models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
     print(models[k])
 
@@ -90,7 +90,8 @@ if args.loss=='consensus_exclude':
     consensus_loss = ClassifierConsensusExcludeLossPTB(models, args)
 elif args.loss=='consensus_forth':
     consensus_loss = ClassifierConsensusForthLossPTB(models, args)
-
+elif args.loss=='consensus_fifth':
+    consensus_loss = ClassifierConsensusFifthLossPTB(models, args)
 # Training code
 
 def repackage_hidden(h):
@@ -127,8 +128,8 @@ def evaluate(data_source):
                 total_loss += len(data) * criterion(output, targets).data
                 hidden = repackage_hidden(hidden)
         losses[k] = total_loss / len(data_source)
-    q_softmax = F.softmax(consensus_loss.q, dim=0) if consensus_loss.learnable_q else F.softmax(torch.zeros(consensus_loss.models_num), dim=0)
-    print('q_softmax:', q_softmax)
+    # q_softmax = F.softmax(consensus_loss.q, dim=0) if consensus_loss.learnable_q else F.softmax(torch.zeros(consensus_loss.models_num), dim=0)
+    print('q:', consensus_loss.q)
     return losses
 
 
@@ -145,15 +146,15 @@ def train():
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        for k in range(args.models_num):
-            hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
-            loss, _, logits, hiddenes = consensus_loss(k, data, hiddenes, targets)
-            opt.zero_grad()
-            loss.backward()
+        # for k in range(args.models_num):
+        hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
+        loss, _, logits, hiddenes = consensus_loss(0, data, hiddenes, targets)
+        opt.zero_grad()
+        loss.backward()
 
-            # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-            torch.nn.utils.clip_grad_norm_(params, args.clip)
-            opt.step()
+        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+        torch.nn.utils.clip_grad_norm_(params, args.clip)
+        opt.step()
 
         total_loss += loss
 
