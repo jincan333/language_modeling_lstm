@@ -323,8 +323,7 @@ class ClassifierConsensusForthLossPTB(object):
         for k in range(self.models_num):
             kl_loss+=kl_div_logits(logits_list[k], ensemble_logits_normalized[k], self.T)
             ce_loss+=F.cross_entropy(logits_list[k], targets)
-        # loss = self.alpha*kl_loss + ce_loss
-        loss = ce_loss
+        loss = (self.alpha*kl_loss + ce_loss)
         return loss, models_pred[index], models_pred, hiddenes
 
 

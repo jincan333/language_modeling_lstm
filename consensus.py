@@ -47,7 +47,7 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
-
+args.clip=args.clip*args.models_num
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -186,7 +186,7 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
     lr = 0.001
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -194,26 +194,25 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        scheduler.step()
+        # scheduler.step()
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
-            # Save the model if the validation loss is the best we've seen so far.
+        # Save the model if the validation loss is the best we've seen so far.
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
-            # else:
-            #     thres+=1
-            # if thres == args.models_num:
-            #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
-            #     if args.opt == 'SGD' or args.opt == 'Momentum':
-            #         lr /= 4.0
-            #         for group in opt.param_groups:
-            #             group['lr'] = lr
+
+        if sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+            # Anneal the learning rate if no improvement has been seen in the validation dataset.
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr /= 4.0
+                for group in opt.param_groups:
+                    group['lr'] = lr
 
 except KeyboardInterrupt:
     print('-' * 89)
