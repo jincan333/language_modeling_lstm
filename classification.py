@@ -299,7 +299,7 @@ class ClassifierConsensusForthLossPTB(object):
         self.mask = torch.ones((config.models_num, config.models_num), requires_grad=False)
         for i in range(self.models_num):
             self.mask[i, i] = 0
-        self.T = 1
+        self.T = config.T
         self.detach = config.detach
         self.learnable_q = config.learnable_q
         print(f'detach: {self.detach}, learnable_q: {self.learnable_q}')
@@ -325,6 +325,49 @@ class ClassifierConsensusForthLossPTB(object):
             ce_loss+=F.cross_entropy(logits_list[k], targets)
         loss = (self.alpha*kl_loss + ce_loss)
         return loss, models_pred[index], models_pred, hiddenes
+
+
+
+
+class ClassifierConsensusForthSymmetrizedLossPTB(object):
+    def __init__(self, models, config):
+        self.models= models
+        self.models_num = config.models_num
+        self.alpha = config.alpha
+        self.q = torch.nn.Parameter(torch.zeros(config.models_num))
+        self.mask = torch.ones((config.models_num, config.models_num), requires_grad=False)
+        for i in range(self.models_num):
+            self.mask[i, i] = 0
+        self.T = config.T
+        self.detach = config.detach
+        self.learnable_q = config.learnable_q
+        print(f'detach: {self.detach}, learnable_q: {self.learnable_q}')
+
+    def calculate_alpha(self, epoch):
+        self.steps
+
+    def __call__(self, index, inputs, hiddenes, targets):
+        ce_loss=0
+        kl_loss=0
+        logits_list = [0 for _ in range(self.models_num)]
+        for k in range(self.models_num):
+            logits_list[k], hiddenes[k] = self.models[k](inputs, hiddenes[k])
+        models_pred = torch.stack([F.log_softmax(logits_list[k], dim=-1) for k in range(self.models_num)])
+        q_logits =  torch.stack([F.log_softmax(self.q*self.mask[k] - (1 - self.mask[k])*1e10, dim=0).cuda().view(self.models_num, 1, 1) for k in range(self.models_num)])
+        models_pred_multi = [0 for _ in range(self.models_num)]
+        for k in range(self.models_num):
+            models_pred_multi[k] = models_pred.detach() + q_logits[k]
+        ensemble_logits = torch.stack([torch.logsumexp(models_pred_multi[k], dim=0) for k in range(self.models_num)])
+        ensemble_logits_normalized = F.log_softmax(ensemble_logits, dim=-1)
+        for k in range(self.models_num):
+            kl_loss+=kl_div_logits(logits_list[k], ensemble_logits_normalized[k], self.T) + \
+                     kl_div_logits(ensemble_logits_normalized[k], logits_list[k], self.T)
+            ce_loss+=F.cross_entropy(logits_list[k], targets)
+        loss = (self.alpha*kl_loss + ce_loss)
+        return loss, models_pred[index], models_pred, hiddenes
+
+
+
 
 
 class ClassifierConsensusFifthLossPTB(object):

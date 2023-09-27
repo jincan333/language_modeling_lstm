@@ -168,7 +168,7 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(model.parameters(), lr=0.001, alpha=0.9)
     lr = 0.001
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -180,18 +180,18 @@ try:
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                            val_loss, math.exp(val_loss)))
         print('-' * 89)
-        scheduler.step()
+        # scheduler.step()
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
-        # else:
-        #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
-        #     if args.opt == 'SGD' or args.opt == 'Momentum':
-        #         lr /= 4.0
-        #         for group in opt.param_groups:
-        #             group['lr'] = lr
+        else:
+            # Anneal the learning rate if no improvement has been seen in the validation dataset.
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr /= 4.0
+                for group in opt.param_groups:
+                    group['lr'] = lr
         
 
 except KeyboardInterrupt:

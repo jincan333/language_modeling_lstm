@@ -7,7 +7,7 @@ import corpus
 import model
 import numpy as np
 import torch.nn.functional as F
-from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB
+from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB
 import json
 
 
@@ -22,6 +22,7 @@ parser.add_argument('--detach', type=int, default=1)
 parser.add_argument('--learnable_q', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
+parser.add_argument('--T', type=int, default=1)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -47,7 +48,7 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
-args.clip=args.clip*args.models_num
+args.clip=args.clip*math.sqrt(args.models_num)
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -92,6 +93,8 @@ elif args.loss=='consensus_forth':
     consensus_loss = ClassifierConsensusForthLossPTB(models, args)
 elif args.loss=='consensus_fifth':
     consensus_loss = ClassifierConsensusFifthLossPTB(models, args)
+elif args.loss=='consensus_forth_symmetrized':
+    consensus_loss = ClassifierConsensusForthSymmetrizedLossPTB(models, args)
 # Training code
 
 def repackage_hidden(h):
@@ -195,6 +198,13 @@ try:
         val_losses = evaluate(val_data)
         thres=0
         # scheduler.step()
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and sum([math.exp(_) for _ in val_losses]) < args.models_num*150:
+        # if sum(best_val_losses) < sum(val_losses):
+            # Anneal the learning rate if no improvement has been seen in the validation dataset.
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr /= 4.0
+                for group in opt.param_groups:
+                    group['lr'] = lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
@@ -207,12 +217,6 @@ try:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
 
-        if sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
-            # Anneal the learning rate if no improvement has been seen in the validation dataset.
-            if args.opt == 'SGD' or args.opt == 'Momentum':
-                lr /= 4.0
-                for group in opt.param_groups:
-                    group['lr'] = lr
 
 except KeyboardInterrupt:
     print('-' * 89)
