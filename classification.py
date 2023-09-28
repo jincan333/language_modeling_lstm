@@ -317,7 +317,10 @@ class ClassifierConsensusForthLossPTB(object):
         q_logits =  torch.stack([F.log_softmax(self.q*self.mask[k] - (1 - self.mask[k])*1e10, dim=0).cuda().view(self.models_num, 1, 1) for k in range(self.models_num)])
         models_pred_multi = [0 for _ in range(self.models_num)]
         for k in range(self.models_num):
-            models_pred_multi[k] = models_pred.detach() + q_logits[k]
+            if self.detach:
+                models_pred_multi[k] = models_pred.detach() + q_logits[k]
+            else:
+                models_pred_multi[k] = models_pred + q_logits[k]
         ensemble_logits = torch.stack([torch.logsumexp(models_pred_multi[k], dim=0) for k in range(self.models_num)])
         ensemble_logits_normalized = F.log_softmax(ensemble_logits, dim=-1)
         for k in range(self.models_num):
@@ -325,8 +328,6 @@ class ClassifierConsensusForthLossPTB(object):
             ce_loss+=F.cross_entropy(logits_list[k], targets)
         loss = (self.alpha*kl_loss + ce_loss)
         return loss, models_pred[index], models_pred, hiddenes
-
-
 
 
 class ClassifierConsensusForthSymmetrizedLossPTB(object):

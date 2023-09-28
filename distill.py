@@ -9,6 +9,7 @@ import numpy as np
 import torch.nn.functional as F
 from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB
 import json
+import wandb
 import randomname
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
@@ -23,6 +24,9 @@ parser.add_argument('--learnable_q', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
+parser.add_argument('--student_epochs', type=int, default=5)
+parser.add_argument('--distill_epochs', type=int, default=10)
+
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -44,11 +48,13 @@ parser.add_argument('--opt', type=str,  default='SGD',
                     help='SGD, Adam, RMSprop, Momentum')
 args = parser.parse_args()
 print(json.dumps(vars(args), indent=4))
+wandb.login(key='ca2f2a2ae6e84e31bbc09a8f35f9b9a534dfbe9b')
+# args.exp_name[:50]+randomname.get_name()[:12]
+wandb.init(project='ensemble_distill', entity='jincan333', name=args.exp_name)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
-args.clip=args.clip*math.sqrt(args.models_num)
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -153,34 +159,76 @@ def train():
         hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
         loss, _, logits, hiddenes = consensus_loss(0, data, hiddenes, targets)
         opt.zero_grad()
+        student_opt.zero_grad()
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(params, args.clip)
+        torch.nn.utils.clip_grad_norm_(all_params, args.clip*math.sqrt(args.models_num))
         opt.step()
+        student_opt.step()
 
         total_loss += loss
 
-        if batch % interval == 0 and batch > 0:
-            cur_loss = total_loss / interval
-            elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f}'.format(
-                epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
-                elapsed * 1000 / interval, cur_loss))
-            total_loss = 0
-            start_time = time.time()
+    cur_loss = total_loss / len(train_data)
+    elapsed = time.time() - start_time
+    print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
+            'loss {:5.2f}'.format(
+        epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+        elapsed * 1000 / len(train_data), cur_loss))
+    wandb.log({'lr': opt.param_groups[0]['lr'], 'train loss': cur_loss, 'batches': batch, 'train time(s)': elapsed}, step=epoch)
+    total_loss = 0
+    start_time = time.time()
+
+
+
+def student_retrain(student):
+    student_opt=torch.optim.SGD(student.parameters(), lr=args.lr)
+    student.init_weights()
+    student.train()
+    for _ in range(args.student_epochs):
+        total_loss = 0
+        start_time = time.time()
+        hidden = student.init_hidden(args.batch_size)
+        # train_data size(batchcnt, bsz)
+        for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
+            data, targets = get_batch(train_data, i)
+            # Starting each batch, we detach the hidden state from how it was previously produced.
+            # If we didn't, the model would try backpropagating all the way to start of the dataset.
+            hidden = repackage_hidden(hidden)
+            output, hidden = student(data, hidden)
+            loss = criterion(output, targets)
+            student_opt.zero_grad()
+            loss.backward()
+
+            # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+            torch.nn.utils.clip_grad_norm_(student.parameters(), args.clip)
+            student_opt.step()
+
+            total_loss += loss.data
+        
+        cur_loss = total_loss / len(train_data)
+        elapsed = time.time() - start_time
+        print('|student epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | time {:5.2f} | '
+                'loss {:5.2f} | ppl {:8.2f} | student'.format(
+            epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+            elapsed, cur_loss, math.exp(cur_loss)))
+        wandb.log({'student lr': student_opt.param_groups[0]['lr'], 'student train loss': cur_loss, 'student batches': batch, 'student train time(s)': elapsed}, step=epoch)
+        total_loss = 0
+        start_time = time.time()
+
+
 
 # Loop over epochs.
 lr = args.lr
 best_val_losses = [None for _ in range(args.models_num)]
 
 params = []
-for k in range(args.models_num):
-    params += list(models[k].parameters())
+params += list(models[0].parameters())
 params.append(consensus_loss.q)
 
 opt = torch.optim.SGD(params, lr=lr)
+student_opt=torch.optim.SGD(models[1].parameters(), lr=args.lr)
+all_params=params+list(models[1].parameters())
 if args.opt == 'Adam':
     opt = torch.optim.Adam(params, lr=0.001, betas=(0.9, 0.99))
     lr = 0.001
@@ -193,12 +241,14 @@ if args.opt == 'RMSprop':
 
 try:
     for epoch in range(1, args.epochs+1):
+        if epoch % args.distill_epochs == 0:
+            student_retrain(models[1])
         epoch_start_time = time.time()
         train()
         val_losses = evaluate(val_data)
         thres=0
         # scheduler.step()
-        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and sum([math.exp(_) for _ in val_losses]) < args.models_num*150:
+        if best_val_losses[0] and best_val_losses[0] < val_losses[0]:
         # if sum(best_val_losses) < sum(val_losses):
             # Anneal the learning rate if no improvement has been seen in the validation dataset.
             if args.opt == 'SGD' or args.opt == 'Momentum':
@@ -207,15 +257,17 @@ try:
                     group['lr'] = lr
         for k in range(args.models_num):
             print('-' * 89)
-            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
+            print('| end of epoch {:3d} | epoch time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
+            wandb.log({'valid loss '+str(k): val_losses[k], 'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
         # Save the model if the validation loss is the best we've seen so far.
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
+        wandb.log({'epoch time': time.time() - epoch_start_time}, step=epoch)
 
 
 except KeyboardInterrupt:
@@ -234,3 +286,5 @@ for k in range(args.models_num):
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_losses[k], math.exp(test_losses[k])))
     print('=' * 89)
+    wandb.log({'test loss '+str(k): test_losses[k], 'test ppl '+str(k): math.exp(test_losses[k])}, step=epoch)
+wandb.finish()
