@@ -10,7 +10,6 @@ import torch.nn.functional as F
 from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB
 import json
 import wandb
-import randomname
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 
@@ -26,7 +25,7 @@ parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
 parser.add_argument('--student_epochs', type=int, default=5)
 parser.add_argument('--distill_epochs', type=int, default=10)
-
+parser.add_argument('--momentum', type=float, default=0.3)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -39,8 +38,8 @@ parser.add_argument('--clip', type=float, default=0.20)
 parser.add_argument('--epochs', type=int, default=60)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
-parser.add_argument('--dropout', type=float, default=0.5)
-parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
+parser.add_argument('--dropout', type=float, default=0.45)
+parser.add_argument('--decreasing_step', type=list, default=[0.4, 0.65, 0.75, 0.83])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
                     help='path to save the final model')
@@ -50,10 +49,12 @@ args = parser.parse_args()
 print(json.dumps(vars(args), indent=4))
 wandb.login(key='ca2f2a2ae6e84e31bbc09a8f35f9b9a534dfbe9b')
 # args.exp_name[:50]+randomname.get_name()[:12]
-wandb.init(project='ensemble_distill', entity='jincan333', name=args.exp_name)
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+wandb.init(project='ensemble_distill_distill', entity='jincan333', name=args.exp_name)
+def set_random_seed(s):
+    np.random.seed(args.seed+s)
+    torch.manual_seed(args.seed+s)
+    torch.cuda.manual_seed(args.seed+s)
+set_random_seed(0)
 torch.cuda.set_device(int(args.gpu))
 
 # Load data
@@ -226,7 +227,7 @@ params = []
 params += list(models[0].parameters())
 params.append(consensus_loss.q)
 
-opt = torch.optim.SGD(params, lr=lr)
+opt = torch.optim.SGD(params, lr=lr, momentum=args.momentum)
 student_opt=torch.optim.SGD(models[1].parameters(), lr=args.lr)
 all_params=params+list(models[1].parameters())
 if args.opt == 'Adam':
@@ -237,24 +238,24 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
     lr = 0.001
-# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
+scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
 try:
     for epoch in range(1, args.epochs+1):
         if epoch % args.distill_epochs == 0:
+            set_random_seed(epoch)
             student_retrain(models[1])
         epoch_start_time = time.time()
         train()
         val_losses = evaluate(val_data)
         thres=0
-        # scheduler.step()
-        if best_val_losses[0] and best_val_losses[0] < val_losses[0]:
-        # if sum(best_val_losses) < sum(val_losses):
-            # Anneal the learning rate if no improvement has been seen in the validation dataset.
-            if args.opt == 'SGD' or args.opt == 'Momentum':
-                lr /= 4.0
-                for group in opt.param_groups:
-                    group['lr'] = lr
+        scheduler.step()
+        # if best_val_losses[0] and best_val_losses[0] < val_losses[0]:
+        #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
+        #     if args.opt == 'SGD' or args.opt == 'Momentum':
+        #         lr /= 4.0
+        #         for group in opt.param_groups:
+        #             group['lr'] = lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | epoch time: {:5.2f}s | valid loss {:5.2f} | '

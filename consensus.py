@@ -7,9 +7,9 @@ import corpus
 import model
 import numpy as np
 import torch.nn.functional as F
-from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB
+from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB, ClassifierConsensusFifthSymmetrizedLossPTB
 import json
-import randomname
+import wandb
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 
@@ -23,6 +23,7 @@ parser.add_argument('--learnable_q', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
+parser.add_argument('--momentum', type=float, default=0.3)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -35,7 +36,7 @@ parser.add_argument('--clip', type=float, default=0.20)
 parser.add_argument('--epochs', type=int, default=60)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
-parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--dropout', type=float, default=0.45)
 parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
@@ -44,11 +45,14 @@ parser.add_argument('--opt', type=str,  default='SGD',
                     help='SGD, Adam, RMSprop, Momentum')
 args = parser.parse_args()
 print(json.dumps(vars(args), indent=4))
+wandb.login(key='ca2f2a2ae6e84e31bbc09a8f35f9b9a534dfbe9b')
+wandb.init(project='ensemble_distill_consensus', entity='jincan333', name=args.exp_name)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
 args.clip=args.clip*math.sqrt(args.models_num)
+
 
 # Load data
 corpus = corpus.Corpus(args.data)
@@ -74,12 +78,16 @@ interval = 200 # interval to report
 ntokens = len(corpus.dictionary) # 10000
 
 models = [0 for _ in range(args.models_num)]
+total_params = 0
 for k in range(args.models_num):
     np.random.seed(k+args.seed)
     torch.manual_seed(k+args.seed)
     torch.cuda.manual_seed(k+args.seed)
     models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
     print(models[k])
+    total_params += sum(p.numel() for p in models[k].parameters())
+    # print(f'Current parameters: {total_params}')
+print(f"Total parameters: {total_params}")
 
 # Load checkpoint
 # if args.checkpoint != '':
@@ -95,6 +103,8 @@ elif args.loss=='consensus_fifth':
     consensus_loss = ClassifierConsensusFifthLossPTB(models, args)
 elif args.loss=='consensus_forth_symmetrized':
     consensus_loss = ClassifierConsensusForthSymmetrizedLossPTB(models, args)
+elif args.loss=='consensus_fifth_symmetrized':
+    consensus_loss = ClassifierConsensusFifthSymmetrizedLossPTB(models, args)
 # Training code
 
 def repackage_hidden(h):
@@ -161,15 +171,15 @@ def train():
 
         total_loss += loss
 
-        if batch % interval == 0 and batch > 0:
-            cur_loss = total_loss / interval
-            elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f}'.format(
-                epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
-                elapsed * 1000 / interval, cur_loss))
-            total_loss = 0
-            start_time = time.time()
+    cur_loss = total_loss / interval
+    elapsed = time.time() - start_time
+    print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
+            'loss {:5.2f}'.format(
+        epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+        elapsed * 1000 / interval, cur_loss))
+    wandb.log({'lr': opt.param_groups[0]['lr'], 'train loss': cur_loss, 'batches': batch, 'train time(s)': elapsed}, step=epoch)
+    total_loss = 0
+    start_time = time.time()
 
 # Loop over epochs.
 lr = args.lr
@@ -180,7 +190,7 @@ for k in range(args.models_num):
     params += list(models[k].parameters())
 params.append(consensus_loss.q)
 
-opt = torch.optim.SGD(params, lr=lr)
+opt = torch.optim.SGD(params, lr=lr, momentum=args.momentum)
 if args.opt == 'Adam':
     opt = torch.optim.Adam(params, lr=0.001, betas=(0.9, 0.99))
     lr = 0.001
@@ -198,7 +208,7 @@ try:
         val_losses = evaluate(val_data)
         thres=0
         # scheduler.step()
-        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and sum([math.exp(_) for _ in val_losses]) < args.models_num*150:
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
         # if sum(best_val_losses) < sum(val_losses):
             # Anneal the learning rate if no improvement has been seen in the validation dataset.
             if args.opt == 'SGD' or args.opt == 'Momentum':
@@ -211,11 +221,13 @@ try:
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
+            wandb.log({'valid loss '+str(k): val_losses[k], 'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
         # Save the model if the validation loss is the best we've seen so far.
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
+        wandb.log({'epoch time': time.time() - epoch_start_time}, step=epoch)
 
 
 except KeyboardInterrupt:
@@ -234,3 +246,5 @@ for k in range(args.models_num):
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_losses[k], math.exp(test_losses[k])))
     print('=' * 89)
+    wandb.log({'test loss '+str(k): test_losses[k], 'test ppl '+str(k): math.exp(test_losses[k])}, step=epoch)
+wandb.finish()

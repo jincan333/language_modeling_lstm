@@ -1,20 +1,21 @@
 #!/bin/bash
 
-loss='consensus_forth'
+loss='consensus_fifth'
 models_num=2
-detach=1
+detach=0
 learnable_q=1
 
-epochs=60
-alpha_list=(0 0.5 0.8 0.9 1 1.1 1.2 1.5)
-gpu_list=(0 0 1 1 2 2 3 3)
+# epochs=60
+epochs=70
+alpha_list=(0.5 1)
+gpu_list=(0 1)
 seeds=(0 0 0 0 0 0 0 0)
-prefix='6.alpha'
+prefix='4.detach'
 for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
-    experiment_name=${prefix}_loss${loss}_models${models_num}_aplha${alpha}_epochs${epochs}_gpu${gpu}_seed${seed}
+    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_epochs${epochs}_gpu${gpu}_seed${seed}
     save=ckpt/consensus/${experiment_name}.pt
     
     folder_name=logs/consensus

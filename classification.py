@@ -99,6 +99,7 @@ class ClassifierMultiTeacherLoss(object):
         return loss, logits_list
     
 
+
 class ClassifierConsensusLoss(object):
     def __init__(self, models, config):
         self.models= models
@@ -135,6 +136,7 @@ class ClassifierConsensusLoss(object):
         # alpha = torch.sigmoid(self.alpha)
         loss = self.alpha*kl_loss + ce_loss
         return loss, net_logits, logits_list
+
 
 
 class ClassifierConsensusLoss_detach(object):
@@ -209,6 +211,7 @@ class ClassifierConsensusAllLoss(object):
                                                kl_div_softmax(logits_list[j], logits_list[i], self.T))
         loss = self.alpha*kl_loss + ce_loss
         return loss, logits_list[index], logits_list
+
 
 
 class ClassifierConsensusExcludeLoss(object):
@@ -330,6 +333,7 @@ class ClassifierConsensusForthLossPTB(object):
         return loss, models_pred[index], models_pred, hiddenes
 
 
+
 class ClassifierConsensusForthSymmetrizedLossPTB(object):
     def __init__(self, models, config):
         self.models= models
@@ -369,8 +373,6 @@ class ClassifierConsensusForthSymmetrizedLossPTB(object):
 
 
 
-
-
 class ClassifierConsensusFifthLossPTB(object):
     def __init__(self, models, config):
         self.models= models
@@ -392,11 +394,52 @@ class ClassifierConsensusFifthLossPTB(object):
         logits_list = [0 for _ in range(self.models_num)]
         for k in range(self.models_num):
             logits_list[k], hiddenes[k] = self.models[k](inputs, hiddenes[k])
-        teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
-                    self.alpha*(kl_div_logits(logits_list[0], logits_list[1].detach(), self.T) + \
-                    kl_div_logits(logits_list[1].detach(), logits_list[0], self.T))
-        student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), self.T) + \
-                    kl_div_logits(logits_list[0].detach(), logits_list[1], self.T)
+        if self.detach:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1].detach(), self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), self.T)
+        else:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1], self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0], self.T)
+        loss = teacher_loss + student_loss
+        return loss, logits_list[index], logits_list, hiddenes
+
+
+
+class ClassifierConsensusFifthSymmetrizedLossPTB(object):
+    def __init__(self, models, config):
+        self.models= models
+        self.models_num = config.models_num
+        self.alpha = config.alpha
+        self.q = torch.nn.Parameter(torch.zeros(config.models_num))
+        self.mask = torch.ones((config.models_num, config.models_num), requires_grad=False)
+        for i in range(self.models_num):
+            self.mask[i, i] = 0
+        self.T = 1
+        self.detach = config.detach
+        self.learnable_q = config.learnable_q
+        print(f'detach: {self.detach}, learnable_q: {self.learnable_q}')
+
+    def calculate_alpha(self, epoch):
+        self.steps
+
+    def __call__(self, index, inputs, hiddenes, targets):
+        logits_list = [0 for _ in range(self.models_num)]
+        for k in range(self.models_num):
+            logits_list[k], hiddenes[k] = self.models[k](inputs, hiddenes[k])
+        if self.detach:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1].detach(), self.T) + \
+                        kl_div_logits(logits_list[1].detach(), logits_list[0], self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), self.T) + \
+                        kl_div_logits(logits_list[0].detach(), logits_list[1], self.T)
+        else:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1], self.T) + \
+                        kl_div_logits(logits_list[1], logits_list[0], self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0], self.T) + \
+                        kl_div_logits(logits_list[0], logits_list[1], self.T)
         loss = teacher_loss + student_loss
         return loss, logits_list[index], logits_list, hiddenes
 

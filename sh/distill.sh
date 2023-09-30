@@ -7,16 +7,16 @@ learnable_q=1
 
 epochs=60
 alpha_list=(1)
-gpu_list=(3)
+gpu_list=(2)
 seeds=(0 0 0 0)
 student_epochs=5
-distill_epochs=20
+distill_epochs=10
 prefix='1.debug'
 for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
-    experiment_name=${prefix}_loss${loss}_models${models_num}_aplha${alpha}_epochs${epochs}_gpu${gpu}_seed${seed}_studentepochs${student_epochs}_distillepochs${distill_epochs}
+    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_epochs${epochs}_gpu${gpu}_seed${seed}_studentepochs${student_epochs}_distillepochs${distill_epochs}
     save=ckpt/distill/${experiment_name}.pt
     folder_name=logs/distill
     if [ ! -d ${folder_name} ]; then
