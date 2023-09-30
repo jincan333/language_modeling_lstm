@@ -24,6 +24,7 @@ parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
 parser.add_argument('--momentum', type=float, default=0.3)
+parser.add_argument('--lr_gamma', type=float, default=0.5)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -214,7 +215,7 @@ try:
             # if sum(best_val_losses) < sum(val_losses):
                 # Anneal the learning rate if no improvement has been seen in the validation dataset.
                 if args.opt == 'SGD' or args.opt == 'Momentum':
-                    lr /= 4.0
+                    lr *= args.lr_gamma
                     for group in opt.param_groups:
                         group['lr'] = lr
         for k in range(args.models_num):

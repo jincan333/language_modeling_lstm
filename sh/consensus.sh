@@ -1,21 +1,22 @@
 #!/bin/bash
 
-loss='consensus_fifth_symmetrized'
+loss='consensus_fifth'
 models_num=2
 detach=1
 learnable_q=1
-
-# epochs=60
 epochs=70
-alpha_list=(0.5 1)
-gpu_list=(2 3)
+# epochs=60
+lr_gammas=(0.3 0.4 0.5 0.6)
+alpha_list=(1.1 1.1 1.1 1.1)
+gpu_list=(0 1 2 3)
 seeds=(0 0 0 0 0 0 0 0)
-prefix='1.test'
-for i in ${!alpha_list[@]};do
+prefix='2.lr_gamma'
+for i in ${!lr_gammas[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
-    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}
+    lr_gamma=${lr_gammas[i]}
+    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}_lr_gamma${lr_gamma}
     save=ckpt/consensus/${experiment_name}.pt
     
     folder_name=logs/consensus
@@ -34,5 +35,6 @@ for i in ${!alpha_list[@]};do
     --epochs ${epochs} \
     --save ${save} \
     --seed ${seed} \
+    --lr_gamma ${lr_gamma} \
     > ${log_filename} 2>&1 &
 done
