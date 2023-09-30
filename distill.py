@@ -176,7 +176,7 @@ def train():
             'loss {:5.2f}'.format(
         epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
         elapsed * 1000 / len(train_data), cur_loss))
-    wandb.log({'lr': opt.param_groups[0]['lr'], 'train loss': cur_loss, 'batches': batch, 'train time(s)': elapsed}, step=epoch)
+    wandb.log({'lr': opt.param_groups[0]['lr'], 'train loss': cur_loss}, step=epoch)
     total_loss = 0
     start_time = time.time()
 
@@ -213,7 +213,7 @@ def student_retrain(student):
                 'loss {:5.2f} | ppl {:8.2f} | student'.format(
             epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
             elapsed, cur_loss, math.exp(cur_loss)))
-        wandb.log({'student lr': student_opt.param_groups[0]['lr'], 'student train loss': cur_loss, 'student batches': batch, 'student train time(s)': elapsed}, step=epoch)
+        wandb.log({'student lr': student_opt.param_groups[0]['lr']}, step=epoch)
         total_loss = 0
         start_time = time.time()
 
@@ -262,7 +262,7 @@ try:
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
-            wandb.log({'valid loss '+str(k): val_losses[k], 'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
+            wandb.log({'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
         # Save the model if the validation loss is the best we've seen so far.
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
@@ -287,5 +287,5 @@ for k in range(args.models_num):
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_losses[k], math.exp(test_losses[k])))
     print('=' * 89)
-    wandb.log({'test loss '+str(k): test_losses[k], 'test ppl '+str(k): math.exp(test_losses[k])}, step=epoch)
+    wandb.log({'test ppl '+str(k): math.exp(test_losses[k])}, step=epoch)
 wandb.finish()
