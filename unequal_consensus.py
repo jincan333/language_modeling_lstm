@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Lang
 
 # consensus
 parser.add_argument('--exp_name', type=str, default='lstm_ptb')
-parser.add_argument('--loss', type=str, default='consensus_forth')
+parser.add_argument('--loss', type=str, default='consensus_fifth')
 parser.add_argument('--alpha', type=float, default=1)
 parser.add_argument('--models_num', type=int, default=2)
 parser.add_argument('--detach', type=int, default=1)
@@ -24,6 +24,7 @@ parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
 parser.add_argument('--momentum', type=float, default=0.3)
+parser.add_argument('--student_lr', type=float, default=20)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -163,11 +164,13 @@ def train():
         hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
         loss, _, logits, hiddenes = consensus_loss(0, data, hiddenes, targets)
         opt.zero_grad()
+        student_opt.zero_grad()
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm_(params, args.clip)
         opt.step()
+        student_opt.step()
 
         total_loss += loss
 
@@ -183,6 +186,7 @@ def train():
 
 # Loop over epochs.
 lr = args.lr
+student_lr = args.student_lr
 best_val_losses = [None for _ in range(args.models_num)]
 
 params = []
@@ -190,7 +194,9 @@ for k in range(args.models_num):
     params += list(models[k].parameters())
 params.append(consensus_loss.q)
 
-opt = torch.optim.SGD(params, lr=lr, momentum=args.momentum)
+# opt = torch.optim.SGD(params, lr=lr, momentum=args.momentum)
+opt = torch.optim.SGD(models[0].parameters(), lr=lr, momentum=args.momentum)
+student_opt= torch.optim.SGD(models[1].parameters(), lr=student_lr, momentum=args.momentum)
 if args.opt == 'Adam':
     opt = torch.optim.Adam(params, lr=0.001, betas=(0.9, 0.99))
     lr = 0.001
@@ -209,14 +215,20 @@ try:
         thres=0
         # scheduler.step()
         if best_val_losses[0]:
-            if ('forth' in args.loss and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses])) \
-                or ('fifth' in args.loss and best_val_losses[0] < val_losses[0]):
+            if 'fifth' in args.loss and best_val_losses[0] < val_losses[0]:
             # if sum(best_val_losses) < sum(val_losses):
                 # Anneal the learning rate if no improvement has been seen in the validation dataset.
                 if args.opt == 'SGD' or args.opt == 'Momentum':
                     lr /= 4.0
                     for group in opt.param_groups:
                         group['lr'] = lr
+            if 'fifth' in args.loss and best_val_losses[1] < val_losses[1]:
+            # if sum(best_val_losses) < sum(val_losses):
+                # Anneal the learning rate if no improvement has been seen in the validation dataset.
+                if args.opt == 'SGD' or args.opt == 'Momentum':
+                    student_lr /= 4.0
+                    for group in student_opt.param_groups:
+                        group['lr'] = student_lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

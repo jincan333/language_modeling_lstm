@@ -16,7 +16,7 @@ for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
-    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_epochs${epochs}_gpu${gpu}_seed${seed}_studentepochs${student_epochs}_distillepochs${distill_epochs}
+    experiment_name=${loss}_${prefix}_models${models_num}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}_studentepochs${student_epochs}_distillepochs${distill_epochs}
     save=ckpt/distill/${experiment_name}.pt
     folder_name=logs/distill
     if [ ! -d ${folder_name} ]; then
