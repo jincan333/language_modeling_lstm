@@ -23,8 +23,8 @@ parser.add_argument('--learnable_q', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
-parser.add_argument('--momentum', type=float, default=0.3)
-parser.add_argument('--lr_gamma', type=float, default=0.5)
+parser.add_argument('--momentum', type=float, default=0.3, help='forth best:0.3, ')
+parser.add_argument('--lr_gamma', type=float, default=0.25, help='forth best:0.25, ')
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -34,7 +34,7 @@ parser.add_argument('--nhid', type=int, default=650)
 parser.add_argument('--nlayers', type=int, default=2)
 parser.add_argument('--lr', type=float, default=30)
 parser.add_argument('--clip', type=float, default=0.20)
-parser.add_argument('--epochs', type=int, default=60)
+parser.add_argument('--epochs', type=int, default=60, help='forth best:60, ')
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.45)
@@ -200,7 +200,7 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
     lr = 0.001
-# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
+scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -208,16 +208,12 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        # scheduler.step()
-        if best_val_losses[0]:
-            if ('forth' in args.loss and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses])) \
-                or ('fifth' in args.loss and best_val_losses[0] < val_losses[0]):
-            # if sum(best_val_losses) < sum(val_losses):
-                # Anneal the learning rate if no improvement has been seen in the validation dataset.
-                if args.opt == 'SGD' or args.opt == 'Momentum':
-                    lr *= args.lr_gamma
-                    for group in opt.param_groups:
-                        group['lr'] = lr
+        scheduler.step()
+        # if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+        #     if args.opt == 'SGD' or args.opt == 'Momentum':
+        #         lr *= args.lr_gamma
+        #         for group in opt.param_groups:
+        #             group['lr'] = lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

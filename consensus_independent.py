@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Lang
 
 # consensus
 parser.add_argument('--exp_name', type=str, default='lstm_ptb')
-parser.add_argument('--loss', type=str, default='consensus_fifth')
+parser.add_argument('--loss', type=str, default='consensus_forth')
 parser.add_argument('--alpha', type=float, default=1)
 parser.add_argument('--models_num', type=int, default=2)
 parser.add_argument('--detach', type=int, default=1)
@@ -23,11 +23,9 @@ parser.add_argument('--learnable_q', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
-parser.add_argument('--momentum', type=float, default=0.3)
-parser.add_argument('--student_lr', type=float, default=30)
+parser.add_argument('--momentum', type=float, default=0.3, help='forth best:0.3, ')
 parser.add_argument('--lr_gamma', type=float, default=0.25, help='forth best:0.25, ')
-parser.add_argument('--student_steps', type=int, default=1, help='')
-parser.add_argument('--current_index', type=int, default=0, help='')
+parser.add_argument('--student_step', type=int, default=1, help='')
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -37,11 +35,11 @@ parser.add_argument('--nhid', type=int, default=650)
 parser.add_argument('--nlayers', type=int, default=2)
 parser.add_argument('--lr', type=float, default=30)
 parser.add_argument('--clip', type=float, default=0.20)
-parser.add_argument('--epochs', type=int, default=60)
+parser.add_argument('--epochs', type=int, default=60, help='forth best:60, ')
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.45)
-parser.add_argument('--decreasing_step', type=list, default=[0.4, 0.65, 0.75, 0.83])
+parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
                     help='path to save the final model')
@@ -55,6 +53,7 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.set_device(int(args.gpu))
+args.clip=args.clip*math.sqrt(args.models_num)
 
 def kl_div_logits(p, q, T):
     loss_func = nn.KLDivLoss(reduction = 'batchmean', log_target=True)
@@ -177,27 +176,29 @@ def train():
         else:
             teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
                         args.alpha*(kl_div_logits(logits_list[0], logits_list[1], args.T))
-        opt.zero_grad()
-        teacher_loss.backward()
-        torch.nn.utils.clip_grad_norm_(models[0].parameters(), args.clip)
-        opt.step()
         
-        # update student
-        for _ in range(args.student_steps):
-            data, targets = get_batch(train_data, args.current_index)
-            args.current_index = (args.bptt+args.current_index)%(train_data.size(0) - 1)
-            for k in range(args.models_num):
-                logits_list[k], hiddenes[k] = models[k](data, hiddenes[k])
-            if args.detach:
-                student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), args.T)
-            else:
-                student_loss=kl_div_logits(logits_list[1], logits_list[0], args.T)
-            student_opt.zero_grad()
-            student_loss.backward()
-            torch.nn.utils.clip_grad_norm_(models[1].parameters(), args.clip)
-            student_opt.step()
+        opt.zero_grad()
+        loss.backward()
 
-        total_loss += teacher_loss
+
+        # update student
+
+        if self.detach:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1].detach(), self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), self.T)
+        else:
+            teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
+                        self.alpha*(kl_div_logits(logits_list[0], logits_list[1], self.T))
+            student_loss=kl_div_logits(logits_list[1], logits_list[0], self.T)
+        loss = teacher_loss + student_loss
+        return loss, logits_list[index], logits_list, hiddenes
+
+        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+        torch.nn.utils.clip_grad_norm_(params, args.clip)
+        opt.step()
+
+        total_loss += loss
 
     cur_loss = total_loss / interval
     elapsed = time.time() - start_time
@@ -211,13 +212,23 @@ def train():
 
 # Loop over epochs.
 lr = args.lr
-student_lr = args.student_lr
 best_val_losses = [None for _ in range(args.models_num)]
 
-opt = torch.optim.SGD(models[0].parameters(), lr=lr, momentum=args.momentum)
-student_opt= torch.optim.SGD(models[1].parameters(), lr=student_lr, momentum=args.momentum)
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+params = []
+for k in range(args.models_num):
+    params += list(models[k].parameters())
+params.append(consensus_loss.q)
+
+opt = torch.optim.SGD(params, lr=lr, momentum=args.momentum)
+if args.opt == 'Adam':
+    opt = torch.optim.Adam(params, lr=0.001, betas=(0.9, 0.99))
+    lr = 0.001
+if args.opt == 'Momentum':
+    opt = torch.optim.SGD(params, lr=lr, momentum=0.8)
+if args.opt == 'RMSprop':
+    opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
+    lr = 0.001
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=0.25)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -225,19 +236,17 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        scheduler.step()
-        student_scheduler.step()
-        if best_val_losses[0]:
-            if best_val_losses[0] < val_losses[0]:
+        # scheduler.step()
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+        # if best_val_losses[0]:
+        #     if ('forth' in args.loss and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses])) \
+        #         or ('fifth' in args.loss and best_val_losses[0] < val_losses[0]):
+            # if sum(best_val_losses) < sum(val_losses):
+                # Anneal the learning rate if no improvement has been seen in the validation dataset.
                 if args.opt == 'SGD' or args.opt == 'Momentum':
                     lr *= args.lr_gamma
                     for group in opt.param_groups:
                         group['lr'] = lr
-            if best_val_losses[1] < val_losses[1]:
-                if args.opt == 'SGD' or args.opt == 'Momentum':
-                    student_lr *= args.lr_gamma
-                    for group in student_opt.param_groups:
-                        group['lr'] = student_lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
@@ -245,11 +254,12 @@ try:
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
             wandb.log({'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
+        # Save the model if the validation loss is the best we've seen so far.
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
-        # wandb.log({'epoch time': time.time() - epoch_start_time}, step=epoch)
+        wandb.log({'epoch time': time.time() - epoch_start_time}, step=epoch)
 
 
 except KeyboardInterrupt:
