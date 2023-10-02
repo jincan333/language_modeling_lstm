@@ -160,17 +160,18 @@ def train():
     consensus_loss.q.requires_grad_(True)
     total_loss = 0
     start_time = time.time()
-    hiddenes = [models[k].init_hidden(args.batch_size) for k in range(args.models_num)]
+    teacher_hiddenes = [models[k].init_hidden(args.batch_size) for k in range(args.models_num)]
+    student_hiddenes = [models[k].init_hidden(args.batch_size) for k in range(args.models_num)]
     # train_data size(batchcnt, bsz)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         # update teacher
-        hiddenes = [repackage_hidden(hiddenes[l]) for l in range(args.models_num)]
+        teacher_hiddenes = [repackage_hidden(teacher_hiddenes[l]) for l in range(args.models_num)]
         logits_list = [0 for _ in range(args.models_num)]
         for k in range(args.models_num):
-            logits_list[k], hiddenes[k] = models[k](data, hiddenes[k])
+            logits_list[k], teacher_hiddenes[k] = models[k](data, teacher_hiddenes[k])
         if args.detach:
             teacher_loss=F.cross_entropy(logits_list[0], targets)+ \
                         args.alpha*(kl_div_logits(logits_list[0], logits_list[1].detach(), args.T))
@@ -186,8 +187,9 @@ def train():
         for _ in range(args.student_steps):
             data, targets = get_batch(train_data, args.current_index)
             args.current_index = (args.bptt+args.current_index)%(train_data.size(0) - 1)
+            student_hiddenes = [repackage_hidden(student_hiddenes[l]) for l in range(args.models_num)]
             for k in range(args.models_num):
-                logits_list[k], hiddenes[k] = models[k](data, hiddenes[k])
+                logits_list[k], student_hiddenes[k] = models[k](data, student_hiddenes[k])
             if args.detach:
                 student_loss=kl_div_logits(logits_list[1], logits_list[0].detach(), args.T)
             else:
@@ -216,8 +218,8 @@ best_val_losses = [None for _ in range(args.models_num)]
 
 opt = torch.optim.SGD(models[0].parameters(), lr=lr, momentum=args.momentum)
 student_opt= torch.optim.SGD(models[1].parameters(), lr=student_lr, momentum=args.momentum)
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+# student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -225,8 +227,8 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        scheduler.step()
-        student_scheduler.step()
+        # scheduler.step()
+        # student_scheduler.step()
         if best_val_losses[0]:
             if best_val_losses[0] < val_losses[0]:
                 if args.opt == 'SGD' or args.opt == 'Momentum':
@@ -238,6 +240,14 @@ try:
                     student_lr *= args.lr_gamma
                     for group in student_opt.param_groups:
                         group['lr'] = student_lr
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr *= args.lr_gamma
+                for group in opt.param_groups:
+                    group['lr'] = lr
+                student_lr *= args.lr_gamma
+                for group in student_opt.param_groups:
+                    group['lr'] = student_lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

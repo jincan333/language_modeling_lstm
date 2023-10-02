@@ -13,7 +13,7 @@ lr_gamma=0.25
 alpha=1
 gpu_list=(0 1 2 3)
 seeds=(0)
-prefix='1.multistep'
+prefix='1.multistep_1'
 for i in ${!seeds[@]};do
     gpu=${gpu_list[i]}
     seed=${seeds[i]}

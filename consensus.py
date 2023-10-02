@@ -38,7 +38,7 @@ parser.add_argument('--epochs', type=int, default=60, help='forth best:60, ')
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.45)
-parser.add_argument('--decreasing_step', type=list, default=[0.6, 0.75, 0.9])
+parser.add_argument('--decreasing_step', type=list, default=[0.4, 0.65, 0.75, 0.83])
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--save', type=str,  default='ckpt/baseline'+randomhash+'PTB.pt',
                     help='path to save the final model')
@@ -200,7 +200,7 @@ if args.opt == 'Momentum':
 if args.opt == 'RMSprop':
     opt = torch.optim.RMSprop(params, lr=0.001, alpha=0.9)
     lr = 0.001
-scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -208,12 +208,12 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        scheduler.step()
-        # if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
-        #     if args.opt == 'SGD' or args.opt == 'Momentum':
-        #         lr *= args.lr_gamma
-        #         for group in opt.param_groups:
-        #             group['lr'] = lr
+        # scheduler.step()
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+            if args.opt == 'SGD' or args.opt == 'Momentum':
+                lr *= args.lr_gamma
+                for group in opt.param_groups:
+                    group['lr'] = lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

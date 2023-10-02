@@ -5,18 +5,20 @@ models_num=2
 detach=1
 learnable_q=1
 epochs=60
-alpha_list=(0.5 1 1.5)
-student_lrs=(30 30 30)
-gpu_list=(3 2 1)
-student_steps_list=(1 1 1)
-seeds=(0 0 0)
-prefix='1.test'
+alpha_list=(1 1 1 1)
+student_lrs=(30 30 30 30)
+lr_gammas=(0.25 0.25 0.25 0.25)
+gpu_list=(0 1 2 3)
+student_steps_list=(1 2 3 4)
+seeds=(0 0 0 0)
+prefix='5.hiddens_debug'
 for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
     student_lr=${student_lrs[i]}
     student_steps=${student_steps_list[i]}
+    lr_gamma=${lr_gammas[i]}
     experiment_name=${loss}_${prefix}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}_student_lr${student_lr}_student_steps${student_steps}
     save=ckpt/unequal_consensus/${experiment_name}.pt
     
@@ -38,5 +40,6 @@ for i in ${!alpha_list[@]};do
     --seed ${seed} \
     --student_lr ${student_lr} \
     --student_steps ${student_steps} \
+    --lr_gamma ${lr_gamma} \
     > ${log_filename} 2>&1 &
 done
