@@ -96,11 +96,6 @@ for k in range(args.models_num):
     # print(f'Current parameters: {total_params}')
 print(f"Total parameters: {total_params}")
 
-# Load checkpoint
-# if args.checkpoint != '':
-#     model = torch.load(args.checkpoint, map_location=lambda storage, loc: storage).cuda()
-
-
 criterion = nn.CrossEntropyLoss().cuda()
 if args.loss=='consensus_exclude':
     consensus_loss = ClassifierConsensusExcludeLossPTB(models, args)
@@ -148,7 +143,6 @@ def evaluate(data_source):
                 total_loss += len(data) * criterion(output, targets).data
                 hidden = repackage_hidden(hidden)
         losses[k] = total_loss / len(data_source)
-    # q_softmax = F.softmax(consensus_loss.q, dim=0) if consensus_loss.learnable_q else F.softmax(torch.zeros(consensus_loss.models_num), dim=0)
     print('q:', consensus_loss.q)
     return losses
 
@@ -203,11 +197,11 @@ def train():
 
     cur_loss = total_loss / interval
     elapsed = time.time() - start_time
-    print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
+    print('| epoch {:3d} | {:5d}/{:5d} batches | teacher lr {:02.2f} | student lr {:02.2f} | ms/batch {:5.2f} | '
             'loss {:5.2f}'.format(
-        epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+        epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'], student_opt.param_groups[0]['lr'],
         elapsed * 1000 / interval, cur_loss))
-    wandb.log({'lr': opt.param_groups[0]['lr'], 'train loss': cur_loss}, step=epoch)
+    wandb.log({'teacher lr': opt.param_groups[0]['lr'], 'student lr': student_opt.param_groups[0]['lr'], 'train loss': cur_loss}, step=epoch)
     total_loss = 0
     start_time = time.time()
 
@@ -229,17 +223,6 @@ try:
         thres=0
         # scheduler.step()
         # student_scheduler.step()
-        # if best_val_losses[0]:
-        #     if best_val_losses[0] < val_losses[0]:
-        #         if args.opt == 'SGD' or args.opt == 'Momentum':
-        #             lr *= args.lr_gamma
-        #             for group in opt.param_groups:
-        #                 group['lr'] = lr
-        #     if best_val_losses[1] < val_losses[1]:
-        #         if args.opt == 'SGD' or args.opt == 'Momentum':
-        #             student_lr *= args.lr_gamma
-        #             for group in student_opt.param_groups:
-        #                 group['lr'] = student_lr
         if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
             if best_val_losses[0] < val_losses[0]:
                 lr *= args.lr_gamma
@@ -255,13 +238,12 @@ try:
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                             val_losses[k], math.exp(val_losses[k])))
             print('-' * 89)
-            wandb.log({'valid ppl '+str(k): math.exp(val_losses[k])}, step=epoch)
             if not best_val_losses[k] or val_losses[k] < best_val_losses[k]:
                 with open(args.save+'_'+str(k), 'wb') as f:
                     torch.save(models[k], f)
                 best_val_losses[k] = val_losses[k]
-        # wandb.log({'epoch time': time.time() - epoch_start_time}, step=epoch)
-
+        wandb.log({'teacher valid ppl': math.exp(val_losses[0])}, step=epoch)
+        wandb.log({'student valid ppl': math.exp(val_losses[1])}, step=epoch)
 
 except KeyboardInterrupt:
     print('-' * 89)
@@ -279,5 +261,6 @@ for k in range(args.models_num):
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_losses[k], math.exp(test_losses[k])))
     print('=' * 89)
-    wandb.log({'test ppl '+str(k): math.exp(test_losses[k])}, step=epoch)
+wandb.log({'teacher test ppl': math.exp(test_losses[0])}, step=epoch)
+wandb.log({'student test ppl': math.exp(test_losses[1])}, step=epoch)
 wandb.finish()
