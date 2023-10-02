@@ -28,6 +28,8 @@ parser.add_argument('--student_lr', type=float, default=30)
 parser.add_argument('--lr_gamma', type=float, default=0.25, help='forth best:0.25, ')
 parser.add_argument('--student_steps', type=int, default=1, help='')
 parser.add_argument('--current_index', type=int, default=0, help='')
+parser.add_argument('--student_epochs', type=int, default=5)
+parser.add_argument('--distill_epochs', type=int, default=5)
 # original
 parser.add_argument('--data', type=str, default='./input', # /input
                     help='location of the data corpus')
@@ -50,19 +52,18 @@ parser.add_argument('--opt', type=str,  default='SGD',
 args = parser.parse_args()
 print(json.dumps(vars(args), indent=4))
 wandb.login(key='ca2f2a2ae6e84e31bbc09a8f35f9b9a534dfbe9b')
-wandb.init(project='ensemble_distill_consensus', entity='jincan333', name=args.exp_name)
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+wandb.init(project='ensemble_distill_unequal_restart', entity='jincan333', name=args.exp_name)
 torch.cuda.set_device(int(args.gpu))
+def set_random_seed(s):
+    np.random.seed(args.seed+s)
+    torch.manual_seed(args.seed+s)
+    torch.cuda.manual_seed(args.seed+s)
+
 
 def kl_div_logits(p, q, T):
     loss_func = nn.KLDivLoss(reduction = 'batchmean', log_target=True)
     loss = loss_func(F.log_softmax(p/T, dim=-1), F.log_softmax(q/T, dim=-1)) * T * T
     return loss
-
-# Load data
-corpus = corpus.Corpus(args.data)
 
 
 def batchify(data, bsz):
@@ -75,6 +76,8 @@ def batchify(data, bsz):
     return data
 
 
+set_random_seed(0)
+corpus = corpus.Corpus(args.data)
 eval_batch_size = 10
 train_data = batchify(corpus.train, args.batch_size) # size(total_len//bsz, bsz)
 val_data = batchify(corpus.valid, eval_batch_size)
@@ -87,9 +90,7 @@ ntokens = len(corpus.dictionary) # 10000
 models = [0 for _ in range(args.models_num)]
 total_params = 0
 for k in range(args.models_num):
-    np.random.seed(k+args.seed)
-    torch.manual_seed(k+args.seed)
-    torch.cuda.manual_seed(k+args.seed)
+    set_random_seed(k)
     models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
     print(models[k])
     total_params += sum(p.numel() for p in models[k].parameters())
@@ -205,6 +206,40 @@ def train():
     total_loss = 0
     start_time = time.time()
 
+
+def student_retrain():
+    student_opt=torch.optim.SGD(models[1].parameters(), lr=student_lr, momentum=args.momentum)
+    models[1].init_weights()
+    models[1].train()
+    for _ in range(args.student_epochs):
+        total_loss = 0
+        start_time = time.time()
+        hidden = models[1].init_hidden(args.batch_size)
+        # train_data size(batchcnt, bsz)
+        for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
+            data, targets = get_batch(train_data, i)
+            # Starting each batch, we detach the hidden state from how it was previously produced.
+            # If we didn't, the model would try backpropagating all the way to start of the dataset.
+            hidden = repackage_hidden(hidden)
+            output, hidden = models[1](data, hidden)
+            loss = criterion(output, targets)
+            student_opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(models[1].parameters(), args.clip)
+            student_opt.step()
+            total_loss += loss.data
+        
+        cur_loss = total_loss / len(train_data)
+        elapsed = time.time() - start_time
+        print('|student epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | time {:5.2f} | '
+                'loss {:5.2f} | ppl {:8.2f} | student'.format(
+            epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'],
+            elapsed, cur_loss, math.exp(cur_loss)))
+        wandb.log({'student lr': student_opt.param_groups[0]['lr']}, step=epoch)
+        total_loss = 0
+        start_time = time.time()
+
+
 # Loop over epochs.
 lr = args.lr
 student_lr = args.student_lr
@@ -212,26 +247,30 @@ best_val_losses = [None for _ in range(args.models_num)]
 
 opt = torch.optim.SGD(models[0].parameters(), lr=lr, momentum=args.momentum)
 student_opt= torch.optim.SGD(models[1].parameters(), lr=student_lr, momentum=args.momentum)
-# scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-# student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
+student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
 
 try:
     for epoch in range(1, args.epochs+1):
+        if epoch % args.distill_epochs == 0 and epoch!=args.epochs:
+            set_random_seed(epoch)
+            student_retrain()
+            student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) - args.student_epochs for _ in args.decreasing_step], gamma=args.lr_gamma)
         epoch_start_time = time.time()
         train()
         val_losses = evaluate(val_data)
         thres=0
-        # scheduler.step()
-        # student_scheduler.step()
-        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
-            if best_val_losses[0] < val_losses[0]:
-                lr *= args.lr_gamma
-                for group in opt.param_groups:
-                    group['lr'] = lr
-            if best_val_losses[1] < val_losses[1]:
-                student_lr *= args.lr_gamma
-                for group in student_opt.param_groups:
-                    group['lr'] = student_lr
+        scheduler.step()
+        student_scheduler.step()
+        # if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]):
+        #     if best_val_losses[0] < val_losses[0]:
+        #         lr *= args.lr_gamma
+        #         for group in opt.param_groups:
+        #             group['lr'] = lr
+        #     if best_val_losses[1] < val_losses[1]:
+        #         student_lr *= args.lr_gamma
+        #         for group in student_opt.param_groups:
+        #             group['lr'] = student_lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '

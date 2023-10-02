@@ -8,11 +8,11 @@ epochs=60
 alpha_list=(1 1 1 1)
 student_lrs=(30 30 30 30)
 lr_gammas=(0.25 0.25 0.25 0.25)
-gpu_list=(5 4 3 1)
-student_steps_list=(1 2 3 4)
+gpu_list=(0 1 2 3)
+student_steps_list=(5 10 15 20)
 seeds=(0 0 0 0)
-prefix='5.hiddens_debug_both_judge_depart'
-for i in ${!gpu_list[@]};do
+prefix='6.student_steps'
+for i in ${!alpha_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
     seed=${seeds[i]}
