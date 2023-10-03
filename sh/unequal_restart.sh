@@ -13,7 +13,7 @@ student_epochs_list=(5 10 15 20 45 50 55 60)
 distill_epochs_list=(10 10 10 10 10 10 10 10)
 seeds=(0 0 0 0 0 0 0 0)
 gpu_list=(3 2 1 0 3 2 1 0)
-prefix='7.student_cosine_new'
+prefix='8.self_judge'
 for i in ${!student_epochs_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}

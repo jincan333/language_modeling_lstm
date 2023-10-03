@@ -237,15 +237,15 @@ def student_retrain():
         for k in range(args.models_num):
             print('|student epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - start_time), val_losses[k], math.exp(val_losses[k])))
-        # if best_val_losses[1] < val_losses[1] and e!=0:
-        #     student_lr = student_opt.param_groups[0]['lr']
-        #     student_lr *= args.lr_gamma
-        #     for group in student_opt.param_groups:
-        #         group['lr'] = student_lr
+        if best_val_losses[1] < val_losses[1] and e!=0:
+            student_lr = student_opt.param_groups[0]['lr']
+            student_lr *= args.lr_gamma
+            for group in student_opt.param_groups:
+                group['lr'] = student_lr
         if val_losses[1] < best_val_losses[1] or e == 0:
             best_val_losses[1] = val_losses[1]
 
-        student_scheduler.step()
+        # student_scheduler.step()
         wandb.log({'student lr': student_opt.param_groups[0]['lr'], 'student valid ppl': math.exp(val_losses[1])}, step=epoch+e+(epoch // args.distill_epochs - 1)*args.student_epochs)
         total_loss = 0
         start_time = time.time()
@@ -257,10 +257,10 @@ best_val_losses = [None for _ in range(args.models_num)]
 opt = torch.optim.SGD(models[0].parameters(), lr=args.lr, momentum=args.momentum)
 student_opt= torch.optim.SGD(models[1].parameters(), lr=args.student_lr, momentum=args.momentum)
 # scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
 # student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
+# student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -268,26 +268,26 @@ try:
             set_random_seed(epoch)
             models[1] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
             student_opt=torch.optim.SGD(models[1].parameters(), lr=args.student_lr, momentum=args.momentum)
-            student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
+            # student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
             student_retrain()
             # student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) - args.student_epochs for _ in args.decreasing_step], gamma=args.lr_gamma)
         epoch_start_time = time.time()
         train()
         val_losses = evaluate(val_data)
         thres=0
-        scheduler.step()
-        student_scheduler.step()
-        # if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and (epoch % args.distill_epochs != 0 or epoch==args.epochs):
-            # if best_val_losses[0] < val_losses[0]:
-            #     lr = opt.param_groups[0]['lr']
-            #     lr *= args.lr_gamma
-            #     for group in opt.param_groups:
-            #         group['lr'] = lr
-            # if best_val_losses[1] < val_losses[1]:
-            #     student_lr = student_opt.param_groups[0]['lr']
-            #     student_lr *= args.lr_gamma
-            #     for group in student_opt.param_groups:
-            #         group['lr'] = student_lr
+        # scheduler.step()
+        # student_scheduler.step()
+        if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and (epoch % args.distill_epochs != 0 or epoch==args.epochs):
+            if best_val_losses[0] < val_losses[0]:
+                lr = opt.param_groups[0]['lr']
+                lr *= args.lr_gamma
+                for group in opt.param_groups:
+                    group['lr'] = lr
+            if best_val_losses[1] < val_losses[1]:
+                student_lr = student_opt.param_groups[0]['lr']
+                student_lr *= args.lr_gamma
+                for group in student_opt.param_groups:
+                    group['lr'] = student_lr
         for k in range(args.models_num):
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
