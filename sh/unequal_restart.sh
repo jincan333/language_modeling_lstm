@@ -8,12 +8,12 @@ epochs=60
 alpha_list=(1 1 1 1)
 student_lrs=(30 30 30 30)
 lr_gammas=(0.25 0.25 0.25 0.25)
-student_steps_list=(2 2 2 2)
-student_epochs_list=(5 5)
-distill_epochs_list=(5 15)
+student_steps_list=(1 1 1 1)
+student_epochs_list=(5 10 15 20)
+distill_epochs_list=(10 10 10 10)
 seeds=(0 0 0 0)
-gpu_list=(2 3)
-prefix='3.teacher_epochs'
+gpu_list=(3 2 1 0)
+prefix='4.more_debug'
 for i in ${!student_epochs_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
