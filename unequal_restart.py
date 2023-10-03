@@ -260,7 +260,7 @@ student_opt= torch.optim.SGD(models[1].parameters(), lr=args.student_lr, momentu
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
 # student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
+student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(int(args.student_epochs*1.5)+args.distill_epochs))
 
 try:
     for epoch in range(1, args.epochs+1):
@@ -268,7 +268,7 @@ try:
             set_random_seed(epoch)
             models[1] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
             student_opt=torch.optim.SGD(models[1].parameters(), lr=args.student_lr, momentum=args.momentum)
-            student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
+            student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(int(args.student_epochs*1.5)+args.distill_epochs))
             student_retrain()
             # student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) - args.student_epochs for _ in args.decreasing_step], gamma=args.lr_gamma)
         epoch_start_time = time.time()

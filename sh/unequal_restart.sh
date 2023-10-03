@@ -13,7 +13,7 @@ student_epochs_list=(5 10 15 20)
 distill_epochs_list=(10 10 10 10)
 seeds=(0 0 0 0)
 gpu_list=(3 2 1 0)
-prefix='6.student_cosine'
+prefix='7.student_cosine_new'
 for i in ${!student_epochs_list[@]};do
     gpu=${gpu_list[i]}
     alpha=${alpha_list[i]}
