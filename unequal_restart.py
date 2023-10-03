@@ -257,7 +257,7 @@ best_val_losses = [None for _ in range(args.models_num)]
 opt = torch.optim.SGD(models[0].parameters(), lr=args.lr, momentum=args.momentum)
 student_opt= torch.optim.SGD(models[1].parameters(), lr=args.student_lr, momentum=args.momentum)
 # scheduler = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
-# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
 # student_scheduler = torch.optim.lr_scheduler.MultiStepLR(student_opt, milestones=[int(args.epochs * _) for _ in args.decreasing_step], gamma=args.lr_gamma)
 # student_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(student_opt, T_max=(args.student_epochs+args.distill_epochs))
@@ -275,14 +275,14 @@ try:
         train()
         val_losses = evaluate(val_data)
         thres=0
-        # scheduler.step()
+        scheduler.step()
         # student_scheduler.step()
         if best_val_losses[0] and sum([math.exp(_) for _ in best_val_losses]) < sum([math.exp(_) for _ in val_losses]) and (epoch % args.distill_epochs != 0 or epoch==args.epochs):
-            if best_val_losses[0] < val_losses[0]:
-                lr = opt.param_groups[0]['lr']
-                lr *= args.lr_gamma
-                for group in opt.param_groups:
-                    group['lr'] = lr
+            # if best_val_losses[0] < val_losses[0]:
+            #     lr = opt.param_groups[0]['lr']
+            #     lr *= args.lr_gamma
+            #     for group in opt.param_groups:
+            #         group['lr'] = lr
             if best_val_losses[1] < val_losses[1]:
                 student_lr = student_opt.param_groups[0]['lr']
                 student_lr *= args.lr_gamma
