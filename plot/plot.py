@@ -57,10 +57,10 @@ if __name__ == "__main__":
     # y_Grasp_time = np.insert(np.array([120 for i in range(num - 1)]), 0, 0)
     
     # 7, 11; 9, 20
-    title = 'Forth version Loss'
+    title = 'LSTM on PTB'
     num, imp_num = 16, 11
     y_baseline = 83.37
-    y_min, y_max = 72, 84
+    y_min, y_max = 70, 84
     
     # 10, 20
     x_sparsity_list = np.array([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5])
@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
 
     x_label = "Alpha"
-    y_label = "PPL (%)"
+    y_label = "PPL"
 
     # Canvas setting
     width = 14
@@ -203,12 +203,10 @@ if __name__ == "__main__":
 
     l_forth = plt.plot(x_grid, y_forth, color=forth_color, marker='o', markevery=markevery, linestyle='-',
                       linewidth=linewidth,
-                      markersize=markersize, label="Forth Loss", alpha=forth_alpha)
+                      markersize=markersize, label="LfT", alpha=forth_alpha)
     plt.fill_between(x_grid, y_forth - y_forth_err, y_forth + y_forth_err, color=forth_color, alpha=fill_in_alpha)
 
 
-    lbest = plt.axhline(y=y_best, color=best_color, linestyle='--', linewidth=3, alpha=best_alpha,
-                        label="Best")
     # lPFTT = plt.plot(x_grid, y_PFTT, color=PFTT_color, marker='*', markevery=markevery, linestyle='-',
     #                  linewidth=linewidth,
     #                  markersize=markersize + 4, label="PFTT", alpha=PFTT_alpha)
