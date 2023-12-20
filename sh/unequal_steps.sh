@@ -20,7 +20,7 @@ for i in ${!gpu_list[@]};do
     student_lr=${student_lrs[i]}
     student_ratio=${student_ratio[i]}
     student_alpha=${alpha}
-    experiment_name=${loss}_${prefix}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}_student_lr${student_lr}_student_ratio${student_ratio}_student_alpha${student_alpha}
+    experiment_name=${prefix}_aplha${alpha}_detach${detach}_epochs${epochs}_gpu${gpu}_seed${seed}_student_lr${student_lr}_student_ratio${student_ratio}_student_alpha${student_alpha}
     save=ckpt/unequal_steps/${experiment_name}.pt
     
     log_folder_name=logs/unequal_steps
