@@ -210,14 +210,14 @@ def train():
             opt.step()
 
         total_loss += teacher_loss
-
-    cur_loss = total_loss / interval
-    elapsed = time.time() - start_time
-    print('| epoch {:3d} | {:5d}/{:5d} batches | teacher lr {:02.2f} | student lr {:02.2f} | ms/batch {:5.2f} | '
-            'loss {:5.2f}'.format(
-        epoch, batch, len(train_data) // args.bptt, opt.param_groups[0]['lr'], student_opt.param_groups[0]['lr'],
-        elapsed * 1000 / interval, cur_loss))
-    wandb.log({'teacher lr': opt.param_groups[0]['lr'], 'student lr': student_opt.param_groups[0]['lr']}, step=epoch)
+        if batch % interval == 0:
+            cur_loss = total_loss / interval
+            elapsed = time.time() - start_time
+            print('| epoch {:3d} | {:5d}/{:5d} batches | teacher lr {:02.2f} | student lr {:02.2f} | ms/batch {:5.2f} | '
+                    'loss {:5.2f}'.format(
+                epoch, batch, train_data.data.size(0) // args.bptt, opt.param_groups[0]['lr'], student_opt.param_groups[0]['lr'],
+                elapsed * 1000 / interval, cur_loss))
+            wandb.log({'teacher lr': opt.param_groups[0]['lr'], 'student lr': student_opt.param_groups[0]['lr']}, step=epoch)
     total_loss = 0
     start_time = time.time()
 

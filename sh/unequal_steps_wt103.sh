@@ -9,7 +9,7 @@ student_lrs=(30 30 30 30 30)
 lr_gammas=(0.25 0.25 0.25 0.25)
 student_ratio=(0 3 3 3)
 seeds=(0 1 2)
-gpu_list=(1)
+gpu_list=(2)
 prefix='0.test'
 for i in ${!gpu_list[@]};do
     gpu=${gpu_list[i]}
