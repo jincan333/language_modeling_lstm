@@ -10,17 +10,21 @@ import torch.nn.functional as F
 from classification import ClassifierConsensusExcludeLossPTB, ClassifierConsensusForthLossPTB, ClassifierConsensusFifthLossPTB, ClassifierConsensusForthSymmetrizedLossPTB, ClassifierConsensusFifthSymmetrizedLossPTB
 import json
 import wandb
+import os
+import configparser
+from wk103 import get_lm_corpus
 
-parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
+
+parser = argparse.ArgumentParser(description='PyTorch RNN/LSTM Language Model')
 
 # consensus
-parser.add_argument('--exp_name', type=str, default='lstm_ptb')
+parser.add_argument('--exp_name', type=str, default='lstm')
 parser.add_argument('--loss', type=str, default='consensus_fifth')
 parser.add_argument('--alpha', type=float, default=1)
 parser.add_argument('--models_num', type=int, default=2)
 parser.add_argument('--detach', type=int, default=1)
 parser.add_argument('--learnable_q', type=int, default=1)
-parser.add_argument('--gpu', type=int, default=0)
+parser.add_argument('--gpu', type=int, default=3)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
 parser.add_argument('--momentum', type=float, default=0.3)
@@ -31,8 +35,7 @@ parser.add_argument('--current_index', type=int, default=0, help='')
 parser.add_argument('--student_ratio', type=int, default=1)
 parser.add_argument('--student_alpha', type=int, default=1)
 # original
-parser.add_argument('--data', type=str, default='./input', # /input
-                    help='location of the data corpus')
+parser.add_argument('--data', type=str, default='ptb', choices = ['ptb', 'wikitext-103'])
 parser.add_argument('--checkpoint', type=str, default='')
 parser.add_argument('--emsize', type=int, default=650)
 parser.add_argument('--nhid', type=int, default=650)
@@ -41,6 +44,7 @@ parser.add_argument('--lr', type=float, default=30)
 parser.add_argument('--clip', type=float, default=0.20)
 parser.add_argument('--epochs', type=int, default=60)
 parser.add_argument('--batch_size', type=int, default=20)
+parser.add_argument('--batch_chunk', type=int, default=1, help='split batch into chunks to save memory')
 parser.add_argument('--bptt', type=int, default=35)
 parser.add_argument('--dropout', type=float, default=0.45)
 parser.add_argument('--decreasing_step', type=list, default=[0.4, 0.65, 0.75, 0.83])
@@ -51,9 +55,16 @@ parser.add_argument('--opt', type=str,  default='SGD',
                     help='SGD, Adam, RMSprop, Momentum')
 args = parser.parse_args()
 print(json.dumps(vars(args), indent=4))
-wandb.login(key='ca2f2a2ae6e84e31bbc09a8f35f9b9a534dfbe9b')
-wandb.init(project='ensemble_distill_unequal_steps_ptb', entity='jincan333', name=args.exp_name)
+
+config=configparser.ConfigParser()
+config.read('../.config')
+wandb_username=config.get('WANDB', 'USER_NAME')
+wandb_key=config.get('WANDB', 'API_KEY')
+
+wandb.login(key=wandb_key)
+wandb.init(project='ensemble_distill_unequal_steps_lstm', entity=wandb_username, name=args.exp_name)
 torch.cuda.set_device(int(args.gpu))
+device=torch.device(f'cuda:{args.gpu}')
 def set_random_seed(s):
     np.random.seed(args.seed+s)
     torch.manual_seed(args.seed+s)
@@ -77,21 +88,39 @@ def batchify(data, bsz):
 
 
 set_random_seed(0)
-corpus = corpus.Corpus(args.data)
 eval_batch_size = 10
-train_data = batchify(corpus.train, args.batch_size) # size(total_len//bsz, bsz)
-val_data = batchify(corpus.valid, eval_batch_size)
-test_data = batchify(corpus.test, eval_batch_size)
+assert args.batch_size % args.batch_chunk == 0
+
+if args.data == 'ptb':
+    corpus = corpus.Corpus(os.path.join('data', args.data))
+    train_data = batchify(corpus.train, args.batch_size) # size(total_len//bsz, bsz)
+    val_data = batchify(corpus.valid, eval_batch_size)
+    test_data = batchify(corpus.test, eval_batch_size)
+    ntokens = len(corpus.dictionary) # 10000
+
+elif args.data == 'wikitext-103':
+    corpus = get_lm_corpus('data/wikitext-103', args.data)
+    ntokens = len(corpus.vocab)
+    args.n_token = ntokens
+    args.batch_size = 60
+    args.tgt_len = 150
+    args.ext_len = 0
+    args.eval_tgt_len = 150
+    train_data = corpus.get_iterator('train', args.batch_size, args.tgt_len,
+        device=device, ext_len=args.ext_len)
+    val_data = corpus.get_iterator('valid', eval_batch_size, args.eval_tgt_len,
+        device=device, ext_len=args.ext_len)
+    test_data = corpus.get_iterator('test', eval_batch_size, args.eval_tgt_len,
+        device=device, ext_len=args.ext_len)
 
 # Build the model
 interval = 200 # interval to report
-ntokens = len(corpus.dictionary) # 10000
 
 models = [0 for _ in range(args.models_num)]
 total_params = 0
 for k in range(args.models_num):
     set_random_seed(k)
-    models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).cuda()
+    models[k] = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout).to(device)
     print(models[k])
     total_params += sum(p.numel() for p in models[k].parameters())
     # print(f'Current parameters: {total_params}')
