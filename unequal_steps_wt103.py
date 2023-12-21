@@ -95,11 +95,11 @@ assert args.batch_size % args.batch_chunk == 0
 corpus = get_lm_corpus(f'data/{args.data}', args.data)
 ntokens = len(corpus.vocab)
 args.n_token = ntokens
-args.batch_size = 20
-args.tgt_len = 80
+args.batch_size = 15
+args.tgt_len = 60
 args.bptt = args.tgt_len
 args.ext_len = 0
-args.eval_tgt_len = 80
+args.eval_tgt_len = args.tgt_len
 train_data = corpus.get_iterator('train', args.batch_size, args.tgt_len,
     device=device, ext_len=args.ext_len)
 val_data = corpus.get_iterator('valid', eval_batch_size, args.eval_tgt_len,
@@ -185,7 +185,7 @@ def train():
 
             # update student
             for _ in range(args.student_ratio):
-                data, targets = train_data.get_batch(args.current_index)
+                data, targets, seq_len = train_data.get_batch(args.current_index)
                 targets = targets.clone().detach().view(-1)
                 args.current_index = (args.bptt+args.current_index)%(train_data.data.size(0) - 1)
                 student_hiddenes = [repackage_hidden(student_hiddenes[l]) for l in range(args.models_num)]
