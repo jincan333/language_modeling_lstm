@@ -20,9 +20,9 @@ class Corpus(object):
     def __init__(self, path):
         self.dictionary = Dictionary()
         # three tensors of word index
-        self.train = self.tokenize(os.path.join(path, 'ptb.train.txt'))
-        self.valid = self.tokenize(os.path.join(path, 'ptb.valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'ptb.test.txt'))
+        self.train = self.tokenize(os.path.join(path, 'train.txt'))
+        self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
+        self.test = self.tokenize(os.path.join(path, 'test.txt'))
 
     def tokenize(self, path):
         assert os.path.exists(path)

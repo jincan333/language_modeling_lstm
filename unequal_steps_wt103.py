@@ -25,7 +25,7 @@ parser.add_argument('--alpha', type=float, default=1)
 parser.add_argument('--models_num', type=int, default=2)
 parser.add_argument('--detach', type=int, default=1)
 parser.add_argument('--learnable_q', type=int, default=1)
-parser.add_argument('--gpu', type=int, default=3)
+parser.add_argument('--gpu', type=int, default=1)
 parser.add_argument('--seed', type=int, default=0,help='random seed')
 parser.add_argument('--T', type=float, default=1.5)
 parser.add_argument('--momentum', type=float, default=0.3)
@@ -78,16 +78,6 @@ def kl_div_logits(p, q, T):
     return loss
 
 
-def batchify(data, bsz):
-    # Work out how cleanly we can divide the dataset into bsz parts.
-    nbatch = data.size(0) // bsz
-    # Trim off any extra elements that wouldn't cleanly fit (remainders).
-    data = data.narrow(0, 0, nbatch * bsz)
-    # Evenly divide the data across the bsz batches.
-    data = data.view(bsz, -1).t().contiguous()
-    return data
-
-
 set_random_seed(0)
 eval_batch_size = 10
 assert args.batch_size % args.batch_chunk == 0
@@ -95,7 +85,7 @@ assert args.batch_size % args.batch_chunk == 0
 corpus = get_lm_corpus(f'data/{args.data}', args.data)
 ntokens = len(corpus.vocab)
 args.n_token = ntokens
-args.batch_size = 15
+args.batch_size = 20
 args.tgt_len = 60
 args.bptt = args.tgt_len
 args.ext_len = 0
@@ -139,6 +129,7 @@ def evaluate(data_source):
             hidden = models[k].init_hidden(eval_batch_size) #hidden size(nlayers, bsz, hdsize)
             for i in range(0, data_source.data.size(0) - 1, args.bptt):# iterate over every timestep
                 data, targets, seq_len = data_source.get_batch(i)
+                targets = targets.clone().detach().view(-1)
                 output, hidden = models[k](data, hidden)
                 total_loss += len(data) * criterion(output, targets).data
                 hidden = repackage_hidden(hidden)

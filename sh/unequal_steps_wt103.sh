@@ -3,13 +3,13 @@
 models_num=2
 detach=1
 learnable_q=1
-epochs=60
-alpha_list=(0 1 1 1 1)
+epochs=1
+alpha_list=(1 1 1 1 1)
 student_lrs=(30 30 30 30 30)
 lr_gammas=(0.25 0.25 0.25 0.25)
-student_ratio=(0 3 3 3)
+student_ratio=(1 3 3 3)
 seeds=(0 1 2)
-gpu_list=(2)
+gpu_list=(5)
 prefix='0.test'
 for i in ${!gpu_list[@]};do
     gpu=${gpu_list[i]}
